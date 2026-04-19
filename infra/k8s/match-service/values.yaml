@@ -1,0 +1,71 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/your-org/cricklive/match-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8082
+
+ingress:
+  enabled: false
+  className: nginx
+  hosts:
+    - host: api.cricklive.dev
+      paths:
+        - path: /api/v1/matches
+          pathType: Prefix
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+env:
+  SPRING_PROFILES_ACTIVE: prod
+  SERVER_PORT: "8082"
+
+# Populated from Kubernetes Secrets — never put real values here
+secretEnv:
+  POSTGRES_USER: ""
+  POSTGRES_PASSWORD: ""
+  POSTGRES_HOST: ""
+  POSTGRES_DB: ""
+  REDIS_HOST: ""
+  REDIS_PASSWORD: ""
+  KAFKA_BOOTSTRAP_SERVERS: ""
+  SCHEMA_REGISTRY_URL: ""
+  JWT_ISSUER_URI: ""
+
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8082
+  initialDelaySeconds: 60
+  periodSeconds: 15
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8082
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  failureThreshold: 3
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: /actuator/prometheus
+  prometheus.io/port: "8082"

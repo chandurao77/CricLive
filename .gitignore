@@ -1,0 +1,74 @@
+# ── Environment & secrets ────────────────────
+.env
+.env.local
+.env.*.local
+CLAUDE.local.md
+.claude/settings.local.json
+
+# ── macOS ─────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Java / Maven ──────────────────────────────
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+hs_err_pid*
+replay_pid*
+
+# ── Spring Boot ───────────────────────────────
+HELP.md
+
+# ── Node / pnpm ───────────────────────────────
+node_modules/
+dist/
+.pnpm-store/
+pnpm-lock.yaml
+.turbo/
+.cache/
+.parcel-cache/
+*.tsbuildinfo
+
+# ── Vite ──────────────────────────────────────
+frontend/web/dist/
+frontend/web/.vite/
+
+# ── IDE ───────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ── Docker ────────────────────────────────────
+infra/docker/data/
+
+# ── Terraform ─────────────────────────────────
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/.terraform.lock.hcl
+
+# ── Logs ──────────────────────────────────────
+*.log
+logs/
+
+# ── Avro generated sources ────────────────────
+services/*/target/generated-sources/
+
+# ── Test reports ──────────────────────────────
+**/surefire-reports/
+**/failsafe-reports/
+playwright-report/
+test-results/
+coverage/

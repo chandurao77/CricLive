@@ -1,0 +1,130 @@
+{
+  "namespace": "dev.cricklive.scoring.avro",
+  "type": "record",
+  "name": "BallEvent",
+  "doc": "Immutable event representing a single ball delivery in a cricket match.",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string",
+      "doc": "UUID — idempotency key; re-sent events with same eventId are idempotent."
+    },
+    {
+      "name": "matchId",
+      "type": "string",
+      "doc": "UUID of the match this ball belongs to."
+    },
+    {
+      "name": "inningsId",
+      "type": "string",
+      "doc": "UUID of the innings this ball belongs to."
+    },
+    {
+      "name": "overNumber",
+      "type": "int",
+      "doc": "0-indexed over number (over 1 = 0, over 2 = 1, ...)."
+    },
+    {
+      "name": "ballNumber",
+      "type": "int",
+      "doc": "1-indexed ball within the over (1-6, or more for extras)."
+    },
+    {
+      "name": "batterId",
+      "type": "string",
+      "doc": "UUID of the batter on strike."
+    },
+    {
+      "name": "bowlerId",
+      "type": "string",
+      "doc": "UUID of the bowler."
+    },
+    {
+      "name": "runsScored",
+      "type": "int",
+      "doc": "Runs credited to the batter (excludes extras).",
+      "default": 0
+    },
+    {
+      "name": "isWicket",
+      "type": "boolean",
+      "doc": "Whether the batter was dismissed on this delivery.",
+      "default": false
+    },
+    {
+      "name": "dismissalType",
+      "type": ["null", "string"],
+      "doc": "Dismissal type enum string (BOWLED, CAUGHT, LBW, etc.). Null if not a wicket.",
+      "default": null
+    },
+    {
+      "name": "dismissedBatterId",
+      "type": ["null", "string"],
+      "doc": "UUID of the dismissed batter (needed for run-outs where non-striker is out).",
+      "default": null
+    },
+    {
+      "name": "fielderId",
+      "type": ["null", "string"],
+      "doc": "UUID of the fielder involved in dismissal (catcher, run-out thrower, etc.).",
+      "default": null
+    },
+    {
+      "name": "isWide",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "isNoBall",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "isBye",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "isLegBye",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "extraRuns",
+      "type": "int",
+      "doc": "Extra runs awarded (wide penalty, bye, leg-bye, etc.).",
+      "default": 0
+    },
+    {
+      "name": "isBoundary",
+      "type": "boolean",
+      "doc": "True if the ball reached the boundary (4 or 6).",
+      "default": false
+    },
+    {
+      "name": "isSix",
+      "type": "boolean",
+      "doc": "True if the ball cleared the boundary on the full (6).",
+      "default": false
+    },
+    {
+      "name": "timestamp",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Wall-clock time of the delivery (UTC millis since epoch)."
+    },
+    {
+      "name": "scorerId",
+      "type": "string",
+      "doc": "UUID of the scorer who entered this delivery."
+    },
+    {
+      "name": "schemaVersion",
+      "type": "int",
+      "doc": "Schema version for migration tooling.",
+      "default": 1
+    }
+  ]
+}
