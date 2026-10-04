@@ -33,7 +33,10 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-            .csrf(csrf -> csrf.disable())
+            // Stateless API authenticated by a bearer token in the Authorization header (no cookies,
+            // no session), so there is no ambient credential for a cross-site request to abuse.
+            // CSRF stays enabled for anything outside these token-authenticated paths.
+            .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**", "/ws/**", "/actuator/**"))
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health/**", "/actuator/info", "/api-docs/**", "/swagger-ui/**").permitAll()
