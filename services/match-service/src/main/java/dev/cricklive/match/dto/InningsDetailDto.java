@@ -15,6 +15,7 @@ public record InningsDetailDto(
         String overs,
         ExtrasDto extras,
         InningsStatus status,
+        double runRate,
         Double requiredRunRate,
         Integer target,
         List<BattingScorecardDto> batting,

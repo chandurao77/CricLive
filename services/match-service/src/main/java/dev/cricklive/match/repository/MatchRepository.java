@@ -19,10 +19,14 @@ public interface MatchRepository extends JpaRepository<Match, UUID> {
 
     List<Match> findByStatusOrderByScheduledStartAsc(MatchStatus status);
 
+    Page<Match> findByStatus(MatchStatus status, Pageable pageable);
+
     @Query("SELECT m FROM Match m WHERE m.status IN :statuses ORDER BY m.scheduledStart ASC")
     List<Match> findByStatusIn(@Param("statuses") List<MatchStatus> statuses);
 
-    @Query("SELECT m FROM Match m JOIN FETCH m.homeTeam JOIN FETCH m.awayTeam JOIN FETCH m.venue WHERE m.id = :id")
+    Page<Match> findByStatusIn(List<MatchStatus> statuses, Pageable pageable);
+
+    @Query("SELECT m FROM Match m LEFT JOIN FETCH m.homeTeam LEFT JOIN FETCH m.awayTeam LEFT JOIN FETCH m.venue WHERE m.id = :id")
     Optional<Match> findByIdWithDetails(@Param("id") UUID id);
 
     Page<Match> findBySeriesId(UUID seriesId, Pageable pageable);

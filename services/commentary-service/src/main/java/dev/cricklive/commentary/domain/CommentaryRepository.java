@@ -22,5 +22,7 @@ public interface CommentaryRepository extends MongoRepository<CommentaryDocument
     List<CommentaryDocument> findByMatchIdAndInningsIdAndOverNumberOrderByBallNumberAsc(
             UUID matchId, UUID inningsId, int overNumber);
 
+    boolean existsByBallEventId(String ballEventId);
+
     Page<CommentaryDocument> findByMatchId(UUID matchId, Pageable pageable);
 }

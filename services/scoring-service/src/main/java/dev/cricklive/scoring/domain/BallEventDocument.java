@@ -9,17 +9,12 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import java.time.Instant;
 import java.util.UUID;
 
-/**
- * Immutable event store entry for every ball delivery.
- * Written once, never mutated — corrections are new compensating events.
- */
-@Document(collection = "ball_events")
+/** Event-store entry for every ball delivery. */
+@Document(collection = BallEventDocument.COLLECTION)
 @CompoundIndexes({
-    @CompoundIndex(name = "match_innings_over_ball",
-                   def = "{'matchId': 1, 'inningsId': 1, 'overNumber': 1, 'ballNumber': 1}",
-                   unique = true),
-    @CompoundIndex(name = "match_timestamp",
-                   def = "{'matchId': 1, 'timestamp': -1}")
+    @CompoundIndex(name = "innings_sequence", def = "{'inningsId': 1, 'sequence': 1}", unique = true),
+    @CompoundIndex(name = "event_id", def = "{'eventId': 1}", unique = true),
+    @CompoundIndex(name = "match_timestamp", def = "{'matchId': 1, 'timestamp': -1}")
 })
 @Getter
 @Builder
@@ -27,16 +22,21 @@ import java.util.UUID;
 @AllArgsConstructor
 public class BallEventDocument {
 
+    public static final String COLLECTION = "ball_events";
+
     @Id
     private String id;
 
-    private String eventId;         // UUID idempotency key
+    private String eventId;
+    private long sequence;
 
     private UUID matchId;
     private UUID inningsId;
 
     private int overNumber;
     private int ballNumber;
+    private boolean legalBall;
+    private int legalBallsInInnings;
 
     private UUID batterId;
     private UUID bowlerId;
@@ -59,18 +59,4 @@ public class BallEventDocument {
 
     private Instant timestamp;
     private UUID scorerId;
-
-    /** Running innings state snapshot at the time of this ball. */
-    private InningsSnapshot inningsSnapshot;
-
-    @Getter
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class InningsSnapshot {
-        private int totalRuns;
-        private int wickets;
-        private String overs;
-        private double runRate;
-    }
 }

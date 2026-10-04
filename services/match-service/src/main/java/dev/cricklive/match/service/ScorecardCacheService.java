@@ -1,18 +1,24 @@
 package dev.cricklive.match.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.cricklive.match.domain.entity.Innings;
-import dev.cricklive.match.dto.InningsSummaryDto;
-import dev.cricklive.match.mapper.MatchMapper;
+import dev.cricklive.match.domain.entity.Match;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.util.UUID;
+import java.math.BigDecimal;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * Writes live scorecard updates to Redis and publishes Pub/Sub notifications
- * so WebSocket gateways (commentary-service) can fan out to connected viewers.
+ * Publishes live scorecard snapshots to Redis Pub/Sub so commentary-service can fan them out to
+ * WebSocket viewers. Publishing happens after the surrounding transaction commits, so clients that
+ * react by re-fetching the match always see the new state.
  */
 @Service
 @RequiredArgsConstructor
@@ -22,28 +28,53 @@ public class ScorecardCacheService {
     private static final String CHANNEL_PATTERN = "match:%s:score";
 
     private final StringRedisTemplate redisTemplate;
-    private final MatchMapper matchMapper;
+    private final ObjectMapper objectMapper;
 
-    /**
-     * Publish a scorecard snapshot to the Redis Pub/Sub channel for this match.
-     * commentary-service instances subscribe and push over WebSocket.
-     */
-    public void publishScorecardUpdate(UUID matchId, Innings innings) {
-        String channel = String.format(CHANNEL_PATTERN, matchId);
-        String payload = buildPayload(innings);
-        redisTemplate.convertAndSend(channel, payload);
-        log.debug("Published scorecard update to channel={}", channel);
+    /** Queues a SCORE message for the match; sent immediately if no transaction is active. */
+    public void publishScorecardUpdate(Match match, Innings innings) {
+        String channel = String.format(CHANNEL_PATTERN, match.getId());
+        String payload = buildPayload(match, innings);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    send(channel, payload);
+                }
+            });
+        } else {
+            send(channel, payload);
+        }
     }
 
-    private String buildPayload(Innings innings) {
-        return String.format(
-                "{\"matchId\":\"%s\",\"inningsId\":\"%s\",\"runs\":%d,\"wickets\":%d,\"overs\":\"%s\",\"runRate\":%.2f}",
-                innings.getMatch().getId(),
-                innings.getId(),
-                innings.getTotalRuns(),
-                innings.getWickets(),
-                innings.getOversCompleted().toPlainString(),
-                innings.currentRunRate()
-        );
+    private void send(String channel, String payload) {
+        try {
+            redisTemplate.convertAndSend(channel, payload);
+            log.debug("Published scorecard update to channel={}", channel);
+        } catch (RuntimeException ex) {
+            log.warn("Could not publish scorecard update to {}: {}", channel, ex.getMessage());
+        }
+    }
+
+    String buildPayload(Match match, Innings innings) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("type", "SCORE");
+        body.put("matchId", match.getId());
+        body.put("inningsId", innings.getId());
+        body.put("inningsNumber", innings.getInningsNumber());
+        body.put("runs", innings.getTotalRuns());
+        body.put("wickets", innings.getWickets());
+        body.put("overs", oversText(innings.getOversCompleted()));
+        body.put("runRate", innings.currentRunRate());
+        body.put("target", innings.getTarget());
+        body.put("matchStatus", match.getStatus());
+        try {
+            return objectMapper.writeValueAsString(body);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Cannot serialise scorecard update", ex);
+        }
+    }
+
+    private static String oversText(BigDecimal overs) {
+        return overs == null ? "0.0" : overs.toPlainString();
     }
 }

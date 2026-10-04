@@ -86,25 +86,37 @@ public class Innings extends BaseEntity {
 
     private Integer target;
 
+    /** Highest ball-event sequence already applied; used to drop duplicate Kafka deliveries. */
+    @Column(name = "last_event_seq", nullable = false)
+    @Builder.Default
+    private long lastEventSeq = 0;
+
     @OneToMany(mappedBy = "innings", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("position ASC")
     @Builder.Default
     private List<BattingScorecard> battingEntries = new ArrayList<>();
 
     @OneToMany(mappedBy = "innings", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("createdAt ASC")
     @Builder.Default
     private List<BowlingScorecard> bowlingEntries = new ArrayList<>();
 
-    /** Current run rate, 0 if no overs bowled yet. */
-    public double currentRunRate() {
-        double overs = oversCompleted.doubleValue();
-        return overs == 0 ? 0.0 : Math.round((totalRuns / overs) * 100.0) / 100.0;
+    /** Legal deliveries bowled so far, derived from the overs-completed value (e.g. 12.3 = 75 balls). */
+    public int legalBalls() {
+        return oversCompleted.intValue() * 6 + oversCompleted.remainder(BigDecimal.ONE).movePointRight(1).intValue();
     }
 
-    /** Required run rate for the chasing team. */
-    public double requiredRunRate(int totalOvers) {
-        if (target == null) return 0.0;
-        int runsNeeded = target - totalRuns;
-        double oversLeft = totalOvers - oversCompleted.doubleValue();
-        return oversLeft <= 0 ? Double.MAX_VALUE : Math.round((runsNeeded / oversLeft) * 100.0) / 100.0;
+    /** Current run rate, 0 if no balls have been bowled yet. */
+    public double currentRunRate() {
+        int balls = legalBalls();
+        return balls == 0 ? 0.0 : Math.round((totalRuns * 6.0 / balls) * 100.0) / 100.0;
+    }
+
+    /** Required run rate for a chasing innings in progress; null when not applicable. */
+    public Double requiredRunRate(int maxOvers) {
+        if (target == null || maxOvers <= 0 || status != InningsStatus.IN_PROGRESS) return null;
+        int ballsLeft = maxOvers * 6 - legalBalls();
+        if (ballsLeft <= 0) return null;
+        return Math.round(((target - totalRuns) * 6.0 / ballsLeft) * 100.0) / 100.0;
     }
 }

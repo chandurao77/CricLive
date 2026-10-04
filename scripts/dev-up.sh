@@ -1,51 +1,40 @@
 #!/usr/bin/env bash
-# Start infrastructure + all services in dev mode.
+# Start the backing infrastructure, the three services (dev profile) and the web app.
+# Requires: docker, Java 21, Maven, Node 20+.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+COMPOSE="docker compose -f infra/docker/docker-compose.yml"
 
-echo "==> Starting infrastructure..."
-docker compose -f infra/docker/docker-compose.yml up -d
+echo "==> Starting infrastructure (postgres, mongo, redis, kafka)..."
+$COMPOSE up -d postgres mongo redis zookeeper kafka
+for svc in postgres mongo redis kafka; do
+  echo -n "  waiting for $svc "
+  until [ "$($COMPOSE ps --format '{{.Health}}' "$svc" 2>/dev/null)" = "healthy" ]; do echo -n "."; sleep 3; done
+  echo " ok"
+done
 
-echo "==> Waiting for Postgres to be ready..."
-until docker compose -f infra/docker/docker-compose.yml exec -T postgres \
-  pg_isready -U cricklive >/dev/null 2>&1; do sleep 2; done
-echo "  Postgres ready."
+PIDS=()
+for svc in match-service scoring-service commentary-service; do
+  echo "==> Starting $svc..."
+  (cd "services/$svc" && SPRING_PROFILES_ACTIVE=dev mvn -q spring-boot:run) &
+  PIDS+=($!)
+done
 
-echo "==> Waiting for Kafka to be ready..."
-sleep 10  # Kafka needs a few seconds after ZooKeeper
+echo "==> Starting web..."
+(cd frontend/web && { [ -d node_modules ] || npm ci; } && npm run dev -- --host) &
+PIDS+=($!)
 
-echo "==> Starting match-service..."
-cd services/match-service
-SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run -q &
-MATCH_PID=$!
-cd "$ROOT"
+cat <<MSG
 
-echo "==> Starting scoring-service..."
-cd services/scoring-service
-SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run -q &
-SCORING_PID=$!
-cd "$ROOT"
+All services starting (give the JVMs ~30s). Press Ctrl+C to stop.
+  Web:         http://localhost:5173
+  match-service    :8082   scoring-service :8083   commentary-service :8084
 
-echo "==> Starting commentary-service..."
-cd services/commentary-service
-SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run -q &
-COMMENTARY_PID=$!
-cd "$ROOT"
+Scorer token:   ./scripts/mint-token.sh SCORER
+Simulate match: node scripts/simulate-match.mjs
+MSG
 
-echo "==> Starting frontend..."
-cd frontend/web
-pnpm dev &
-FRONTEND_PID=$!
-cd "$ROOT"
-
-echo ""
-echo "All services started. Press Ctrl+C to stop."
-echo "  Frontend:          http://localhost:5173"
-echo "  match-service API: http://localhost:8082/swagger-ui.html"
-echo "  Kafka UI:          http://localhost:8090"
-echo "  pgAdmin:           http://localhost:5050"
-
-trap "kill $MATCH_PID $SCORING_PID $COMMENTARY_PID $FRONTEND_PID 2>/dev/null; exit 0" SIGINT SIGTERM
+trap 'kill "${PIDS[@]}" 2>/dev/null; exit 0' INT TERM
 wait
