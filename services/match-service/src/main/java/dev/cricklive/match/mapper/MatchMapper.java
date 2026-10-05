@@ -6,6 +6,8 @@ import org.mapstruct.*;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @Mapper(componentModel = "spring",
         nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
@@ -22,58 +24,113 @@ public interface MatchMapper {
     MatchSummaryDto toSummaryDto(Match match);
 
     @Mapping(target = "seriesName", source = "series.name")
+    @Mapping(target = "statusText", expression = "java(buildStatusText(match))")
     @Mapping(target = "venue", source = "venue")
     @Mapping(target = "toss", expression = "java(toTossDto(match))")
     @Mapping(target = "result", expression = "java(toResultDto(match))")
     @Mapping(target = "innings", source = "innings")
-    MatchDetailDto toDetailDto(Match match);
+    MatchDetailDto toDetailDto(Match match, @Context Map<UUID, String> names);
 
     TeamRefDto toTeamRef(Team team);
 
     VenueDto toVenueDto(Venue venue);
 
+    List<InningsDetailDto> toInningsDetailList(List<Innings> innings, @Context Map<UUID, String> names);
+
     @Mapping(target = "overs", expression = "java(formatOvers(innings.getOversCompleted()))")
     @Mapping(target = "extras", expression = "java(toExtrasDto(innings))")
     @Mapping(target = "batting", source = "battingEntries")
     @Mapping(target = "bowling", source = "bowlingEntries")
-    @Mapping(target = "requiredRunRate", expression = "java(innings.requiredRunRate(50))")
-    InningsDetailDto toInningsDetail(Innings innings);
+    @Mapping(target = "runRate", expression = "java(innings.currentRunRate())")
+    @Mapping(target = "requiredRunRate",
+             expression = "java(innings.requiredRunRate(innings.getMatch().getFormat().maxOvers()))")
+    InningsDetailDto toInningsDetail(Innings innings, @Context Map<UUID, String> names);
 
     @Mapping(target = "overs", expression = "java(formatOvers(innings.getOversCompleted()))")
     @Mapping(target = "runRate", expression = "java(innings.currentRunRate())")
     InningsSummaryDto toInningsSummary(Innings innings);
 
+    List<BattingScorecardDto> toBattingDtoList(List<BattingScorecard> entries, @Context Map<UUID, String> names);
+
+    List<BowlingScorecardDto> toBowlingDtoList(List<BowlingScorecard> entries, @Context Map<UUID, String> names);
+
     @Mapping(target = "strikeRate", expression = "java(entry.strikeRate())")
-    @Mapping(target = "playerName", ignore = true)
-    @Mapping(target = "dismissalDescription", ignore = true)
-    BattingScorecardDto toBattingDto(BattingScorecard entry);
+    @Mapping(target = "playerName", expression = "java(nameOf(names, entry.getPlayerId()))")
+    @Mapping(target = "dismissalDescription", expression = "java(describeDismissal(entry, names))")
+    BattingScorecardDto toBattingDto(BattingScorecard entry, @Context Map<UUID, String> names);
 
     @Mapping(target = "overs", expression = "java(entry.getOvers().toPlainString())")
     @Mapping(target = "economy", expression = "java(entry.economy())")
-    @Mapping(target = "playerName", ignore = true)
-    BowlingScorecardDto toBowlingDto(BowlingScorecard entry);
-
-    List<BattingScorecardDto> toBattingDtoList(List<BattingScorecard> entries);
-
-    List<BowlingScorecardDto> toBowlingDtoList(List<BowlingScorecard> entries);
+    @Mapping(target = "playerName", expression = "java(nameOf(names, entry.getPlayerId()))")
+    BowlingScorecardDto toBowlingDto(BowlingScorecard entry, @Context Map<UUID, String> names);
 
     default String formatOvers(BigDecimal overs) {
-        if (overs == null) return "0.0";
-        int completedOvers = overs.intValue();
-        int balls = (int) Math.round((overs.doubleValue() - completedOvers) * 10);
-        return completedOvers + "." + balls;
+        return overs == null ? "0.0" : overs.toPlainString();
+    }
+
+    default String nameOf(Map<UUID, String> names, UUID playerId) {
+        return playerId == null ? null : names.getOrDefault(playerId, "Unknown player");
+    }
+
+    default String describeDismissal(BattingScorecard entry, Map<UUID, String> names) {
+        if (entry.getDismissalType() == null) {
+            return "not out";
+        }
+        String bowler = nameOf(names, entry.getDismissedByBowlerId());
+        String fielder = nameOf(names, entry.getDismissedByFielderId());
+        return switch (entry.getDismissalType()) {
+            case BOWLED -> "b " + bowler;
+            case LBW -> "lbw b " + bowler;
+            case CAUGHT -> fielder != null && !fielder.equals(bowler)
+                    ? "c " + fielder + " b " + bowler
+                    : "c & b " + bowler;
+            case STUMPED -> "st " + (fielder != null ? fielder : "keeper") + " b " + bowler;
+            case RUN_OUT -> "run out" + (fielder != null ? " (" + fielder + ")" : "");
+            case HIT_WICKET -> "hit wicket b " + bowler;
+            default -> entry.getDismissalType().name().toLowerCase().replace('_', ' ');
+        };
     }
 
     default String buildStatusText(Match match) {
         return switch (match.getStatus()) {
-            case LIVE -> "Live";
+            case LIVE -> liveText(match);
             case UPCOMING -> "Upcoming";
-            case COMPLETED -> "Completed";
+            case COMPLETED -> resultText(match);
             case ABANDONED -> "Abandoned";
             case RAIN_DELAY -> "Rain delay";
             case INNINGS_BREAK -> "Innings break";
-            default -> match.getStatus().name();
+            case TOSS -> "Toss";
+            case NO_RESULT -> "No result";
         };
+    }
+
+    default String liveText(Match match) {
+        Innings current = match.currentInnings();
+        if (current == null || current.getTarget() == null || !match.getFormat().isLimitedOvers()) {
+            return "Live";
+        }
+        int needed = current.getTarget() - current.getTotalRuns();
+        int ballsLeft = match.getFormat().maxOvers() * 6 - current.legalBalls();
+        return current.getBattingTeam().getShortName() + " need " + Math.max(needed, 0)
+                + " runs from " + Math.max(ballsLeft, 0) + " balls";
+    }
+
+    default String resultText(Match match) {
+        if (match.getResultType() == null) {
+            return "Completed";
+        }
+        return switch (match.getResultType()) {
+            case WIN -> match.getWinningTeam().getName() + " won by " + match.getWinMargin() + " "
+                    + singularize(match.getWinMarginUnit().name().toLowerCase(), match.getWinMargin());
+            case TIE -> "Match tied";
+            case DRAW -> "Match drawn";
+            case NO_RESULT -> "No result";
+            case ABANDONED -> "Abandoned";
+        };
+    }
+
+    default String singularize(String unit, int amount) {
+        return amount == 1 ? unit.substring(0, unit.length() - 1) : unit;
     }
 
     default InningsSummaryDto firstInnings(Match match) {
@@ -94,7 +151,7 @@ public interface MatchMapper {
     default ResultDto toResultDto(Match match) {
         if (match.getResultType() == null) return null;
         String winnerName = match.getWinningTeam() != null ? match.getWinningTeam().getName() : null;
-        java.util.UUID winnerId = match.getWinningTeam() != null ? match.getWinningTeam().getId() : null;
+        UUID winnerId = match.getWinningTeam() != null ? match.getWinningTeam().getId() : null;
         return new ResultDto(match.getResultType(), winnerId, winnerName, match.getWinMargin(), match.getWinMarginUnit());
     }
 

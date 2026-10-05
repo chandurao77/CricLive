@@ -42,6 +42,13 @@ public class MatchController {
         return ResponseEntity.ok(matchService.getUpcomingMatches(pageable));
     }
 
+    @GetMapping("/completed")
+    @Operation(summary = "Get finished matches (paginated), most recent first")
+    public ResponseEntity<Page<MatchSummaryDto>> getCompleted(
+            @PageableDefault(size = 20, sort = "scheduledStart", direction = Sort.Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(matchService.getCompletedMatches(pageable));
+    }
+
     @GetMapping("/series/{seriesId}")
     @Operation(summary = "Get all matches for a series")
     public ResponseEntity<Page<MatchSummaryDto>> getBySeriesId(
@@ -58,6 +65,12 @@ public class MatchController {
     public ResponseEntity<MatchDetailDto> getMatchDetail(
             @Parameter(description = "Match UUID") @PathVariable UUID matchId) {
         return ResponseEntity.ok(matchService.getMatchDetail(matchId));
+    }
+
+    @GetMapping("/{matchId}/squads")
+    @Operation(summary = "Get both squads for a match")
+    public ResponseEntity<List<SquadDto>> getSquads(@PathVariable UUID matchId) {
+        return ResponseEntity.ok(matchService.getSquads(matchId));
     }
 
     @PostMapping
@@ -78,5 +91,17 @@ public class MatchController {
             @PathVariable UUID matchId,
             @RequestParam MatchStatus status) {
         return ResponseEntity.ok(matchService.updateMatchStatus(matchId, status));
+    }
+
+    @PostMapping("/{matchId}/innings")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SCORER')")
+    @Operation(summary = "Start the next innings (admin / scorer)",
+               description = "Creates the innings, sets the chase target for a second limited-overs innings, and puts the match LIVE.")
+    @ApiResponse(responseCode = "200", description = "Match detail including the new innings")
+    @ApiResponse(responseCode = "409", description = "Match state does not allow a new innings")
+    public ResponseEntity<MatchDetailDto> startInnings(
+            @PathVariable UUID matchId,
+            @Valid @RequestBody StartInningsRequest request) {
+        return ResponseEntity.ok(matchService.startInnings(matchId, request.battingTeamId()));
     }
 }

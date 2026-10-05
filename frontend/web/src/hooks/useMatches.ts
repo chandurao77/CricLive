@@ -4,6 +4,8 @@ import { matchApi, commentaryApi } from '@/lib/api'
 export const matchKeys = {
   live: ['matches', 'live'] as const,
   upcoming: (page: number) => ['matches', 'upcoming', page] as const,
+  completed: ['matches', 'completed'] as const,
+  squads: (id: string) => ['matches', id, 'squads'] as const,
   detail: (id: string) => ['matches', id] as const,
   commentary: (matchId: string) => ['commentary', matchId] as const,
 }
@@ -24,12 +26,30 @@ export function useUpcomingMatches(page = 0) {
   })
 }
 
-export function useMatchDetail(matchId: string) {
+export function useCompletedMatches() {
+  return useQuery({
+    queryKey: matchKeys.completed,
+    queryFn: () => matchApi.getCompleted(),
+    staleTime: 60_000,
+  })
+}
+
+export function useSquads(matchId: string) {
+  return useQuery({
+    queryKey: matchKeys.squads(matchId),
+    queryFn: () => matchApi.getSquads(matchId),
+    enabled: !!matchId,
+    staleTime: Infinity,
+  })
+}
+
+export function useMatchDetail(matchId: string, refetchInterval?: number) {
   return useQuery({
     queryKey: matchKeys.detail(matchId),
     queryFn: () => matchApi.getDetail(matchId),
     enabled: !!matchId,
     staleTime: 10_000,
+    refetchInterval,
   })
 }
 

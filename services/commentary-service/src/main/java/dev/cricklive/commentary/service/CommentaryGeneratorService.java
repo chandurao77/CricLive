@@ -2,116 +2,112 @@ package dev.cricklive.commentary.service;
 
 import dev.cricklive.commentary.domain.CommentaryDocument;
 import dev.cricklive.commentary.domain.CommentaryDocument.CommentaryEventType;
-import lombok.extern.slf4j.Slf4j;
+import dev.cricklive.commentary.dto.BallEventMessage;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
 
 /**
- * Generates human-readable commentary text from a ball event map.
- * In production this can be enhanced with an LLM or a template engine.
+ * Generates human-readable commentary text from a ball event.
+ * Template-based; can be swapped for an LLM or richer templating later.
  */
 @Service
-@Slf4j
 public class CommentaryGeneratorService {
 
     private static final Random RNG = new Random();
 
-    public CommentaryDocument generate(Map<String, Object> event) {
-        int runsScored = toInt(event.get("runsScored"));
-        boolean isWicket = toBool(event.get("isWicket"));
-        boolean isWide = toBool(event.get("isWide"));
-        boolean isNoBall = toBool(event.get("isNoBall"));
-        boolean isBoundary = runsScored == 4;
-        boolean isSix = runsScored == 6;
-
-        CommentaryEventType type = resolveEventType(runsScored, isWicket, isWide, isNoBall);
-        String text = buildText(event, type, runsScored, isWicket, isWide, isNoBall, isBoundary, isSix);
+    public CommentaryDocument generate(BallEventMessage e) {
+        CommentaryEventType type = resolveEventType(e);
+        String text = buildText(e, type);
 
         return CommentaryDocument.builder()
-                .matchId(UUID.fromString((String) event.get("matchId")))
-                .inningsId(UUID.fromString((String) event.get("inningsId")))
-                .overNumber(toInt(event.get("overNumber")))
-                .ballNumber(toInt(event.get("ballNumber")))
+                .matchId(e.matchId())
+                .inningsId(e.inningsId())
+                .overNumber(e.overNumber())
+                .ballNumber(e.ballNumber())
+                .ballEventId(e.eventId())
                 .text(text)
-                .htmlText(toHtml(text, type))
+                .htmlText(escapeHtml(text))
                 .eventType(type)
-                .tags(buildTags(type, isBoundary, isSix))
+                .tags(buildTags(type, e))
                 .language("en")
-                .timestamp(Instant.now())
+                .timestamp(e.timestamp() != null ? e.timestamp() : Instant.now())
                 .author("system")
                 .build();
     }
 
-    private CommentaryEventType resolveEventType(int runs, boolean wicket, boolean wide, boolean noBall) {
-        if (wicket) return CommentaryEventType.WICKET;
-        if (runs == 6) return CommentaryEventType.SIX;
-        if (runs == 4) return CommentaryEventType.BOUNDARY;
-        if (wide) return CommentaryEventType.WIDE;
-        if (noBall) return CommentaryEventType.NO_BALL;
+    CommentaryEventType resolveEventType(BallEventMessage e) {
+        if (e.wicket()) return CommentaryEventType.WICKET;
+        if (e.six()) return CommentaryEventType.SIX;
+        if (e.boundary()) return CommentaryEventType.BOUNDARY;
+        if (e.wide()) return CommentaryEventType.WIDE;
+        if (e.noBall()) return CommentaryEventType.NO_BALL;
         return CommentaryEventType.NORMAL;
     }
 
-    private String buildText(Map<String, Object> event, CommentaryEventType type,
-                             int runs, boolean wicket, boolean wide, boolean noBall,
-                             boolean boundary, boolean six) {
-        String bowler = (String) event.getOrDefault("bowlerId", "Bowler");
-        String batter = (String) event.getOrDefault("batterId", "Batter");
-
+    String buildText(BallEventMessage e, CommentaryEventType type) {
         return switch (type) {
             case WICKET -> pickRandom(
-                "OUT! What a breakthrough! The batter is dismissed.",
-                "WICKET! The bowler strikes at the crucial moment!",
-                "That's OUT! The fielding side is ecstatic!"
-            );
+                "OUT! " + dismissalPhrase(e.dismissalType()) + " The fielding side is ecstatic!",
+                "WICKET! " + dismissalPhrase(e.dismissalType()) + " A crucial breakthrough!",
+                "That's OUT! " + dismissalPhrase(e.dismissalType()));
             case SIX -> pickRandom(
                 "SIX! Massive hit! The ball sails over the ropes!",
                 "SIX! That's gone into the stands! What a shot!",
-                "MAXIMUM! Effortless power hitting, " + runs + " runs!"
-            );
+                "MAXIMUM! Effortless power hitting.");
             case BOUNDARY -> pickRandom(
                 "FOUR! Lovely timing through the covers.",
                 "FOUR! That raced away to the boundary!",
-                "FOUR! Beautiful strokeplay — well timed."
-            );
-            case WIDE -> "Wide! The bowler strays outside the tramline. Extras: 1.";
-            case NO_BALL -> "No Ball! The bowler overstepped. Free hit on the next delivery.";
-            default -> runs == 0
-                ? pickRandom("Dot ball. Tight line from the bowler.", "No run. Good delivery.", "Defended solidly.")
-                : runs + (runs == 1 ? " run taken." : " runs scored.");
+                "FOUR! Beautiful strokeplay, well timed.");
+            case WIDE -> "Wide! The bowler strays down the leg side. " + plural(e.extraRuns(), "run") + " to the extras.";
+            case NO_BALL -> "No ball! The bowler overstepped. Free hit next. "
+                    + (e.runsScored() > 0 ? plural(e.runsScored(), "run") + " off the bat plus the no-ball." : "1 run to the extras.");
+            default -> normalText(e);
         };
     }
 
-    private String toHtml(String text, CommentaryEventType type) {
-        String prefix = switch (type) {
-            case WICKET -> "<span class='badge badge-red'>OUT</span> ";
-            case SIX -> "<span class='badge badge-purple'>SIX</span> ";
-            case BOUNDARY -> "<span class='badge badge-green'>FOUR</span> ";
-            default -> "";
-        };
-        return prefix + text;
+    private String normalText(BallEventMessage e) {
+        if (e.bye()) return "Byes! " + plural(e.extraRuns(), "run") + " taken as the keeper misses it.";
+        if (e.legBye()) return "Leg byes. " + plural(e.extraRuns(), "run") + " off the pads.";
+        if (e.runsScored() == 0) {
+            return pickRandom("Dot ball. Tight line from the bowler.", "No run. Good delivery.", "Defended solidly.");
+        }
+        return plural(e.runsScored(), "run") + (e.runsScored() == 1 ? " taken." : " scored.");
     }
 
-    private List<String> buildTags(CommentaryEventType type, boolean boundary, boolean six) {
+    private String dismissalPhrase(String type) {
+        if (type == null) return "The batter is dismissed.";
+        return switch (type) {
+            case "BOWLED" -> "Bowled! The stumps are shattered.";
+            case "CAUGHT" -> "Caught! Straight down the fielder's throat.";
+            case "LBW" -> "LBW! Plumb in front.";
+            case "RUN_OUT" -> "Run out! A mix-up in the middle.";
+            case "STUMPED" -> "Stumped! Out of the crease and the keeper does the rest.";
+            case "HIT_WICKET" -> "Hit wicket! The batter has dislodged the bails.";
+            default -> "The batter is dismissed.";
+        };
+    }
+
+    private List<String> buildTags(CommentaryEventType type, BallEventMessage e) {
         List<String> tags = new ArrayList<>();
         tags.add(type.name());
-        if (boundary) tags.add("BOUNDARY");
-        if (six) tags.add("SIX");
+        if (e.boundary()) tags.add("BOUNDARY");
+        if (e.six()) tags.add("SIX");
         return tags;
+    }
+
+    static String escapeHtml(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    private static String plural(int n, String word) {
+        return n + " " + word + (n == 1 ? "" : "s");
     }
 
     private String pickRandom(String... options) {
         return options[RNG.nextInt(options.length)];
-    }
-
-    private int toInt(Object val) {
-        if (val instanceof Number n) return n.intValue();
-        return 0;
-    }
-
-    private boolean toBool(Object val) {
-        if (val instanceof Boolean b) return b;
-        return false;
     }
 }

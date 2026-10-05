@@ -104,15 +104,62 @@ export interface MatchDetail extends MatchSummary {
   innings: InningsDetail[]
 }
 
+export interface Player {
+  id: string
+  name: string
+  role: string | null
+}
+
+export interface Squad {
+  team: TeamRef
+  players: Player[]
+}
+
+export type ScorerDismissal = 'BOWLED' | 'CAUGHT' | 'LBW' | 'RUN_OUT' | 'STUMPED' | 'HIT_WICKET'
+
+/** Body of POST /api/v1/score/ball */
+export interface BallInput {
+  matchId: string
+  inningsId: string
+  batterId: string
+  bowlerId: string
+  runsScored: number
+  wide?: boolean
+  noBall?: boolean
+  bye?: boolean
+  legBye?: boolean
+  extraRuns?: number
+  wicket?: boolean
+  dismissalType?: ScorerDismissal
+  dismissedBatterId?: string
+  fielderId?: string
+  idempotencyKey: string
+}
+
+export interface BallAck {
+  eventId: string
+  sequence: number
+  overNumber: number
+  ballNumber: number
+  legalBall: boolean
+  duplicate: boolean
+}
+
 /** Real-time live update pushed over WebSocket */
 export interface LiveUpdate {
-  type: 'SCORE' | 'COMMENTARY' | 'WICKET' | 'PONG'
+  type: 'SCORE' | 'COMMENTARY' | 'PONG'
   matchId: string
+  id?: string
   inningsId?: string
+  inningsNumber?: number
   runs?: number
   wickets?: number
   overs?: string
   runRate?: number
+  target?: number | null
+  matchStatus?: MatchStatus
   commentary?: string
+  over?: string
   eventType?: string
+  timestamp?: string
 }

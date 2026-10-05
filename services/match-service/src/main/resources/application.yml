@@ -37,18 +37,11 @@ spring:
       group-id: match-service-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
-        specific.avro.reader: true
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
-
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${JWT_ISSUER_URI:http://localhost:8080/auth}
+        spring.json.value.default.type: dev.cricklive.match.dto.BallEventMessage
+        spring.json.use.type.headers: false
+        spring.json.trusted.packages: dev.cricklive.match.dto
 
 management:
   endpoints:
@@ -63,6 +56,7 @@ management:
       prometheus:
         enabled: true
   tracing:
+    enabled: ${TRACING_ENABLED:false}
     sampling:
       probability: ${TRACING_SAMPLE_RATE:0.1}
 
@@ -80,7 +74,13 @@ logging:
     dev.cricklive: INFO
     org.springframework.security: WARN
 
+eureka:
+  client:
+    enabled: false
+
 cricklive:
+  security:
+    jwt-secret: ${JWT_SECRET:}
   kafka:
     topics:
       ball-events: ball-events
@@ -96,7 +96,7 @@ spring:
       on-profile: dev
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/cricklive
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/cricklive}
     username: ${POSTGRES_USER:cricklive}
     password: ${POSTGRES_PASSWORD:cricklive_secret}
 
@@ -107,13 +107,14 @@ spring:
       password: ${REDIS_PASSWORD:cricklive_secret}
 
   kafka:
-    bootstrap-servers: localhost:29092
-    properties:
-      schema.registry.url: http://localhost:8081
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
 
-eureka:
-  client:
-    enabled: false
+  flyway:
+    locations: classpath:db/migration,classpath:db/dev
+
+cricklive:
+  security:
+    jwt-secret: ${JWT_SECRET:dev-only-jwt-secret-change-me-0123456789}
 
 logging:
   level:
@@ -139,13 +140,9 @@ spring:
 
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
-    properties:
-      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
 
-eureka:
-  client:
-    service-url:
-      defaultZone: ${EUREKA_SERVER_URL:http://eureka:8761/eureka/}
+  flyway:
+    locations: classpath:db/migration,classpath:db/dev
 
 ---
 spring:
@@ -175,14 +172,8 @@ spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
     properties:
-      schema.registry.url: ${SCHEMA_REGISTRY_URL}
       security.protocol: SASL_SSL
       sasl.mechanism: SCRAM-SHA-256
-
-eureka:
-  client:
-    service-url:
-      defaultZone: ${EUREKA_SERVER_URL}
 
 management:
   tracing:

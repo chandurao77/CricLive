@@ -27,8 +27,8 @@ Built with **Java 21 + Spring Boot 3.3**, **React 18 + TypeScript**, Apache Kafk
 └───────────────────────────┬────────────────────────────────┘
                             │ HTTPS / WSS
 ┌───────────────────────────▼────────────────────────────────┐
-│         API GATEWAY  (Spring Cloud Gateway :8080)           │
-│     Rate limiting │ JWT Auth │ Routing │ Load balancing     │
+│   Edge routing: Vite proxy (dev) / nginx (Docker)           │
+│   (Spring Cloud Gateway is planned, not yet built)          │
 └───────────────────────────┬────────────────────────────────┘
                             │
 ┌───────────────────────────▼────────────────────────────────┐
@@ -63,7 +63,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed Mermaid diagrams.
 | Language | Java 21 (LTS) |
 | Framework | Spring Boot 3.3, Spring Cloud 2023.x |
 | Reactive | Spring WebFlux, Project Reactor |
-| Security | Spring Security, OAuth2, JWT (JJWT) |
+| Security | Spring Security, HS256 JWT resource server (see ADR-010) |
 | Messaging | Apache Kafka 3.7, Kafka Streams |
 | Real-time | WebSocket (STOMP over SockJS) |
 | Frontend | React 18, TypeScript, Vite, TailwindCSS, shadcn/ui |
@@ -76,7 +76,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed Mermaid diagrams.
 | Search | Elasticsearch 8 |
 | Object store | MinIO (S3-compatible) |
 | Migrations | Flyway |
-| Schema | Apache Avro + Confluent Schema Registry |
+| Kafka payloads | JSON (see ADR-009) |
 | Containers | Docker, Docker Compose |
 | Orchestration | Kubernetes + Helm |
 | CI/CD | GitHub Actions |
@@ -130,7 +130,8 @@ cricklive/
 
 | Service | Port |
 |---------|------|
-| API Gateway | **8080** |
+| Web (Docker/nginx) | **8080** |
+| Web (Vite dev) | 5173 |
 | match-service | 8082 |
 | scoring-service | 8083 |
 | commentary-service | 8084 |
@@ -145,7 +146,6 @@ cricklive/
 | notification-service | 8093 |
 | search-service | 8094 |
 | media-service | 8095 |
-| Schema Registry | 8081 |
 | PostgreSQL | 5432 |
 | pgAdmin | 5050 |
 | MongoDB | 27017 |
@@ -161,60 +161,56 @@ cricklive/
 
 ## Quick Start (Local)
 
+### What works today
+
+`match-service` (:8082), `scoring-service` (:8083) and `commentary-service` (:8084) plus the React web app form a complete, working vertical slice: schedule/live/results pages, a live scorecard and commentary feed over WebSocket, and a scorer console to enter ball-by-ball data. The other services listed above are planned (see the roadmap). There is no API gateway; the web app talks to the three services through a dev proxy (Vite) or nginx (Docker).
+
 ### Prerequisites
 
-- Docker Desktop 4.28+ (with Compose v2)
-- Java 21 (OpenJDK or Eclipse Temurin)
-- Node.js 20 LTS + pnpm 9
-- Maven 3.9
+- Docker with Compose v2
+- Java 21 and Maven 3.9 (only for running services outside Docker)
+- Node.js 20+
 
-### 1. Clone & configure
-
-```bash
-git clone https://github.com/your-org/cricklive.git
-cd cricklive
-cp .env.example .env
-# Edit .env and set passwords before starting
-```
-
-### 2. Start infrastructure
+### Option A: everything in Docker
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d
+cp .env.example .env                       # set JWT_SECRET (>= 32 bytes) and passwords
+docker compose --env-file .env -f infra/docker/docker-compose.yml up -d --build
+# Web UI: http://localhost:8080
 ```
 
-Wait for all health checks to pass (~60 s):
+The `docker` profile loads demo data (fictional players, an India v Australia T20I scheduled for ~1 hour after first start). Optional tooling (pgAdmin, Kafka UI, Elasticsearch, Kibana, MinIO) is behind the `tools` profile: add `--profile tools`.
+
+### Option B: infrastructure in Docker, services on the host
 
 ```bash
-docker compose ps
+./scripts/dev-up.sh          # postgres, mongo, redis, kafka + 3 services + web (http://localhost:5173)
 ```
 
-### 3. Run a service (example: match-service)
+### Try it
 
 ```bash
-cd services/match-service
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
+./scripts/mint-token.sh SCORER          # prints a JWT; paste it into http://localhost:5173/score
+node scripts/simulate-match.mjs         # or play a whole T20I automatically via the API
 ```
 
-### 4. Run the frontend
+Open the match page in another tab to watch the score and commentary update live. The dev profile uses the secret `dev-only-jwt-secret-change-me-0123456789`; in Docker you must set `JWT_SECRET` and pass the same value to `mint-token.sh`.
+
+### Tests
 
 ```bash
-cd frontend/web
-pnpm install
-pnpm dev
-# → http://localhost:5173
+for s in match scoring commentary; do (cd services/$s-service && mvn test); done
+cd frontend/web && npm ci && npm test && npm run lint && npm run build
 ```
 
-### 5. Useful local URLs
+### Useful local URLs
 
 | URL | Purpose |
 |-----|---------|
-| http://localhost:8080 | API Gateway |
-| http://localhost:5173 | React frontend |
-| http://localhost:5050 | pgAdmin |
-| http://localhost:8090 | Kafka UI |
-| http://localhost:5601 | Kibana |
-| http://localhost:9001 | MinIO Console |
+| http://localhost:5173 | React frontend (dev server) |
+| http://localhost:8080 | React frontend (Docker/nginx) |
+| http://localhost:8082/swagger-ui.html | match-service API |
+| http://localhost:5050 / 8090 / 5601 / 9001 | pgAdmin / Kafka UI / Kibana / MinIO (`tools` profile) |
 
 ---
 

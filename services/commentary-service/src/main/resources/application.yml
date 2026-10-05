@@ -6,11 +6,15 @@ spring:
   data:
     mongodb:
       auto-index-creation: true
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${JWT_ISSUER_URI:http://localhost:8080/auth}
+      uuid-representation: standard
+  kafka:
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.value.default.type: dev.cricklive.commentary.dto.BallEventMessage
+        spring.json.use.type.headers: false
+        spring.json.trusted.packages: dev.cricklive.commentary.dto
 
 management:
   endpoints:
@@ -28,6 +32,8 @@ springdoc:
     path: /swagger-ui.html
 
 cricklive:
+  security:
+    jwt-secret: ${JWT_SECRET:}
   kafka:
     topics:
       ball-events: ball-events
@@ -45,18 +51,20 @@ spring:
       on-profile: dev
   data:
     mongodb:
-      uri: mongodb://${MONGO_USERNAME:cricklive}:${MONGO_PASSWORD:cricklive_secret}@localhost:27017/cricklive?authSource=admin
+      uri: ${MONGODB_URI:mongodb://${MONGO_USERNAME:cricklive}:${MONGO_PASSWORD:cricklive_secret}@localhost:27017/cricklive?authSource=admin}
     redis:
       host: localhost
       port: 6379
       password: ${REDIS_PASSWORD:cricklive_secret}
   kafka:
-    bootstrap-servers: localhost:29092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
     consumer:
       group-id: commentary-service-group
       auto-offset-reset: earliest
-    properties:
-      schema.registry.url: http://localhost:8081
+
+cricklive:
+  security:
+    jwt-secret: ${JWT_SECRET:dev-only-jwt-secret-change-me-0123456789}
 
 logging:
   level:
@@ -79,5 +87,3 @@ spring:
     consumer:
       group-id: commentary-service-group
       auto-offset-reset: earliest
-    properties:
-      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}

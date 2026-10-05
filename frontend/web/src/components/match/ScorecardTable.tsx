@@ -36,7 +36,7 @@ export default function ScorecardTable({ innings }: ScorecardTableProps) {
                   <td className="px-3 py-2 text-right text-slate-500">{b.didNotBat ? '-' : b.ballsFaced}</td>
                   <td className="px-3 py-2 text-right text-slate-500">{b.didNotBat ? '-' : b.fours}</td>
                   <td className="px-3 py-2 text-right text-slate-500">{b.didNotBat ? '-' : b.sixes}</td>
-                  <td className="px-3 py-2 text-right text-slate-500">{b.didNotBat ? '-' : b.strikeRate.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right text-slate-500">{b.didNotBat ? '-' : (b.strikeRate ?? 0).toFixed(1)}</td>
                 </tr>
               ))}
             </tbody>
@@ -80,7 +80,7 @@ export default function ScorecardTable({ innings }: ScorecardTableProps) {
                   <td className="px-3 py-2 text-right text-slate-500">{b.maidens}</td>
                   <td className="px-3 py-2 text-right text-slate-500">{b.runs}</td>
                   <td className="px-3 py-2 text-right font-bold">{b.wickets}</td>
-                  <td className="px-3 py-2 text-right text-slate-500">{b.economy.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right text-slate-500">{(b.economy ?? 0).toFixed(1)}</td>
                 </tr>
               ))}
             </tbody>

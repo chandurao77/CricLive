@@ -6,11 +6,19 @@ spring:
   data:
     mongodb:
       auto-index-creation: true
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${JWT_ISSUER_URI:http://localhost:8080/auth}
+      uuid-representation: standard
+  kafka:
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        linger.ms: 0
+        request.timeout.ms: 3000
+        delivery.timeout.ms: 5000
+        max.block.ms: 3000
+        spring.json.add.type.headers: false
 
 management:
   endpoints:
@@ -36,6 +44,8 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{traceId},%X{spanId}] %logger{36} - %msg%n"
 
 cricklive:
+  security:
+    jwt-secret: ${JWT_SECRET:}
   kafka:
     topics:
       ball-events: ball-events
@@ -47,11 +57,13 @@ spring:
       on-profile: dev
   data:
     mongodb:
-      uri: mongodb://${MONGO_USERNAME:cricklive}:${MONGO_PASSWORD:cricklive_secret}@localhost:27017/cricklive?authSource=admin
+      uri: ${MONGODB_URI:mongodb://${MONGO_USERNAME:cricklive}:${MONGO_PASSWORD:cricklive_secret}@localhost:27017/cricklive?authSource=admin}
   kafka:
-    bootstrap-servers: localhost:29092
-    properties:
-      schema.registry.url: http://localhost:8081
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+
+cricklive:
+  security:
+    jwt-secret: ${JWT_SECRET:dev-only-jwt-secret-change-me-0123456789}
 
 logging:
   level:
@@ -67,5 +79,3 @@ spring:
       uri: mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${MONGO_HOST:mongo}:27017/${MONGO_DB:cricklive}?authSource=admin
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
-    properties:
-      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}

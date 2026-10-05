@@ -55,7 +55,7 @@
 ## ADR-005: JWT with RS256 (Asymmetric)
 
 **Date:** 2024-01-01  
-**Status:** Accepted
+**Status:** Superseded by ADR-010 for the current implementation
 
 **Decision:** JWTs are signed with RS256. The private key lives only in `user-service`; all other services hold the public key and verify locally without round-tripping to `user-service`.
 
@@ -68,7 +68,7 @@
 ## ADR-006: Avro for Kafka Message Schema
 
 **Date:** 2024-01-01  
-**Status:** Accepted
+**Status:** Superseded by ADR-009 for the current implementation
 
 **Decision:** All Kafka messages use Apache Avro with Confluent Schema Registry.
 
@@ -101,3 +101,52 @@
 **Rationale:** Third-party data feeds have licensing costs and variable data quality. Building the scoring engine first allows full control of the data model and validation logic.
 
 **Trade-off:** Manual scoring introduces human latency (~5–10 s per ball). Acceptable for initial launch; feed adapter abstraction (`ScoreIngestionPort`) is designed-in for easy plug-in later.
+
+---
+
+## ADR-009: JSON instead of Avro on Kafka
+
+**Date:** 2026-10-04  
+**Status:** Accepted
+
+**Decision:** `ball-events` messages are JSON (Spring Kafka `JsonSerializer`/`JsonDeserializer`, keyed by `matchId`, type headers disabled, trusted package pinned). The Avro plugin, Schema Registry and the committed `.avsc` were removed.
+
+**Rationale:** The Avro setup could not build or run without a Schema Registry and an external Confluent repository, and nothing consumed the registry's guarantees yet. Ball events are small and low-volume at this stage.
+
+**Trade-off:** No registry-enforced compatibility. Evolve the `BallEvent` record additively (new optional fields); revisit Avro when more consumers exist.
+
+---
+
+## ADR-010: Shared-secret HS256 JWT, no gateway
+
+**Date:** 2026-10-04  
+**Status:** Accepted (interim)
+
+**Decision:** Services validate HS256 JWTs signed with `JWT_SECRET` (min 32 bytes, enforced at startup; no default outside the `dev` profile). Roles come from a `roles` claim and map to `ROLE_*`. GET endpoints for matches and commentary are public. There is no API gateway; Vite (dev) and nginx (Docker) route by path prefix.
+
+**Rationale:** The earlier config pointed at an OAuth2 `issuer-uri` that no service provides, so no authenticated call could succeed. There is also no `user-service` yet, so tokens are minted with `scripts/mint-token.sh`.
+
+**Trade-off:** Every service holds the signing secret, and there is no login UI. Replace with RS256 + `user-service` (ADR-005) when accounts are built.
+
+---
+
+## ADR-011: Per-innings sequence for idempotent, ordered scoring
+
+**Date:** 2026-10-04  
+**Status:** Accepted
+
+**Decision:** `scoring-service` allocates a strictly increasing `sequence` and a legal-ball count per innings with an atomic Mongo `findOneAndUpdate`, stores the event (unique indexes on `(inningsId, sequence)` and `eventId`) and publishes it. `match-service` applies an event only if `sequence > innings.lastEventSeq`. If publishing fails, the counter is compensated and the 503 is returned; gaps are therefore allowed.
+
+**Rationale:** Kafka redelivery and scorer retries must not double-count runs, and over/ball numbers must come from the server, not the client.
+
+**Trade-off:** Strict ordering relies on keying by `matchId`. The previous `POST /score/undo` stub was removed rather than shipped half-working; undo (a compensating event) is future work.
+
+---
+
+## ADR-012: Demo data only in the dev/docker profiles
+
+**Date:** 2026-10-04  
+**Status:** Accepted
+
+**Decision:** Players and the T20I fixture live in `db/dev` (loaded by the `dev` and `docker` profiles via `spring.flyway.locations`). Core schema changes are in `db/migration`. Test-format matches can be started and scored but only limited-overs results (win/tie) are computed; draws, follow-ons and declarations are not modelled.
+

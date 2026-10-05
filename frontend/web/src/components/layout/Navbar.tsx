@@ -18,15 +18,9 @@ export default function Navbar() {
           <Link to="/" className="text-slate-600 dark:text-slate-300 hover:text-brand-600 transition-colors">
             Scores
           </Link>
-          <a href="#series" className="text-slate-600 dark:text-slate-300 hover:text-brand-600 transition-colors">
-            Series
-          </a>
-          <a href="#stats" className="text-slate-600 dark:text-slate-300 hover:text-brand-600 transition-colors">
-            Stats
-          </a>
-          <a href="#news" className="text-slate-600 dark:text-slate-300 hover:text-brand-600 transition-colors">
-            News
-          </a>
+          <Link to="/score" className="text-slate-600 dark:text-slate-300 hover:text-brand-600 transition-colors">
+            Scorer console
+          </Link>
         </nav>
 
         <button

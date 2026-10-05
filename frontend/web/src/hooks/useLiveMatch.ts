@@ -9,7 +9,7 @@ interface UseLiveMatchOptions {
   enabled?: boolean
 }
 
-type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error'
+export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error'
 
 /**
  * Connects to commentary-service WebSocket (STOMP over SockJS) and subscribes

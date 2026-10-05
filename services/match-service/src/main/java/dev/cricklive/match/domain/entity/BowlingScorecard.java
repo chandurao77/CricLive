@@ -43,8 +43,18 @@ public class BowlingScorecard extends BaseEntity {
     @Builder.Default
     private Short noBalls = 0;
 
+    /** Runs conceded in the over in progress; reset when the bowler completes an over. */
+    @Column(name = "current_over_runs", nullable = false)
+    @Builder.Default
+    private Short currentOverRuns = 0;
+
+    /** Legal balls bowled, derived from the overs value (e.g. 3.2 = 20 balls). */
+    public int ballsBowled() {
+        return overs.intValue() * 6 + overs.remainder(BigDecimal.ONE).movePointRight(1).intValue();
+    }
+
     public double economy() {
-        double o = overs.doubleValue();
-        return o == 0 ? 0.0 : Math.round((runs / o) * 100.0) / 100.0;
+        int balls = ballsBowled();
+        return balls == 0 ? 0.0 : Math.round((runs * 6.0 / balls) * 100.0) / 100.0;
     }
 }

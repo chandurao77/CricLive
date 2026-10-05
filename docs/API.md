@@ -1,7 +1,8 @@
 # CrickLive — REST API Reference
 
 Base URL: `https://api.cricklive.dev/api/v1`  
-Auth: `Authorization: Bearer <JWT>` (omit for public read endpoints)  
+Auth: `Authorization: Bearer <JWT>` (omit for public read endpoints). Write endpoints need a `roles` claim containing `SCORER` or `ADMIN` (HS256, see ADR-010; `./scripts/mint-token.sh`).
+There is no gateway: each path prefix is served by one service (`/matches` → 8082, `/score` → 8083, `/commentary` + `/ws` → 8084).  
 Errors: RFC 7807 Problem Details
 
 ---
@@ -139,6 +140,17 @@ Transition match status.
 
 ---
 
+### GET /matches/completed?page=0&size=20
+Paginated finished matches, newest first. `statusText` carries the result, e.g. `Australia won by 6 wickets`.
+
+### GET /matches/{id}/squads
+Both teams' players (`id`, `name`, `role`) for the match, used by the scorer console.
+
+### POST /matches/{id}/innings *(scorer/admin)*
+Start the next innings. Body: `{ "battingTeamId": "..." }`. Returns 409 if the previous innings is still open or the match limit is reached. The first call also moves the match to LIVE.
+
+---
+
 ## Scoring Endpoints (scoring-service :8083)
 
 ### POST /score/ball *(scorer/admin)*
@@ -163,14 +175,15 @@ Record a single ball delivery. Idempotent via `idempotencyKey`.
 }
 ```
 
-**Response 202** — Accepted (async Kafka publish)
+**Response 202** — Accepted. The event is persisted and published to Kafka (the call waits for the broker ack).
+```json
+{ "eventId": "...", "sequence": 7, "overNumber": 0, "ballNumber": 4, "legalBall": true, "duplicate": false }
+```
+Resending the same `idempotencyKey` returns the original ack with `"duplicate": true` and does not score the ball twice.
+Over/ball numbers are derived by the server from the innings' legal-ball count.
 
----
-
-### POST /score/undo?inningsId={id} *(scorer/admin)*
-Append a compensating undo event for the last delivery.
-
-**Response 202** — Accepted
+**Response 400** — Rule violation (ProblemDetail), e.g. runs off the bat on a wide, bye without extras, a dismissal not possible on that delivery.
+**Response 503** — Kafka publish failed; the ball was rolled back, retry with the same key.
 
 ---
 

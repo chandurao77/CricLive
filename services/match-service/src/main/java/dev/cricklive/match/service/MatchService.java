@@ -46,8 +46,22 @@ public interface MatchService {
     MatchSummaryDto updateMatchStatus(UUID matchId, MatchStatus newStatus);
 
     /**
-     * Apply ball event from Kafka to update live scorecard projections.
-     * Publishes updated scorecard to Redis Pub/Sub.
+     * Returns completed matches, most recent first.
      */
-    void applyBallEvent(BallEventMessage event);
+    Page<MatchSummaryDto> getCompletedMatches(Pageable pageable);
+
+    /**
+     * Starts the next innings: creates it, sets the chase target when applicable, and puts the
+     * match LIVE.
+     *
+     * @throws IllegalStateException when the match state does not allow a new innings
+     */
+    MatchDetailDto startInnings(UUID matchId, UUID battingTeamId);
+
+    /**
+     * Squads (home first, then away) for the match, used by the scoring console to pick batters and bowlers.
+     *
+     * @throws dev.cricklive.match.exception.MatchNotFoundException when id is unknown
+     */
+    List<SquadDto> getSquads(UUID matchId);
 }

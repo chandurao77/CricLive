@@ -1,5 +1,6 @@
 package dev.cricklive.scoring.controller;
 
+import dev.cricklive.scoring.dto.BallAck;
 import dev.cricklive.scoring.dto.BallInputDto;
 import dev.cricklive.scoring.service.ScoringService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,8 +12,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 @RestController
@@ -27,32 +32,24 @@ public class ScoringController {
     @PreAuthorize("hasRole('SCORER') or hasRole('ADMIN')")
     @Operation(
         summary = "Record a single ball delivery",
-        description = "Validates, persists to event store, and publishes to Kafka. Idempotent — safe to retry with same idempotencyKey."
-    )
-    @ApiResponse(responseCode = "202", description = "Ball accepted and queued for processing")
+        description = "Validates, persists to the event store, and publishes to Kafka. "
+                + "Idempotent: safe to retry with the same idempotencyKey.")
+    @ApiResponse(responseCode = "202", description = "Ball accepted and published")
     @ApiResponse(responseCode = "400", description = "Validation error in ball input")
     @ApiResponse(responseCode = "403", description = "Not a scorer or admin")
-    public ResponseEntity<Void> recordBall(
+    @ApiResponse(responseCode = "503", description = "Event bus unavailable; ball not recorded, retry")
+    public ResponseEntity<BallAck> recordBall(
             @Valid @RequestBody BallInputDto input,
             @AuthenticationPrincipal Jwt jwt) {
-
-        UUID scorerId = UUID.fromString(jwt.getSubject());
-        scoringService.recordBall(input, scorerId);
-        return ResponseEntity.accepted().build();
+        return ResponseEntity.accepted().body(scoringService.recordBall(input, scorerIdOf(jwt)));
     }
 
-    @PostMapping("/undo")
-    @PreAuthorize("hasRole('SCORER') or hasRole('ADMIN')")
-    @Operation(
-        summary = "Undo the last ball (correction)",
-        description = "Appends a compensating UNDO event. Does not delete the original event."
-    )
-    @ApiResponse(responseCode = "202", description = "Undo accepted")
-    public ResponseEntity<Void> undoLastBall(
-            @RequestParam UUID inningsId,
-            @AuthenticationPrincipal Jwt jwt) {
-
-        // TODO: implement undo via compensating event
-        return ResponseEntity.accepted().build();
+    private static UUID scorerIdOf(Jwt jwt) {
+        String subject = String.valueOf(jwt.getSubject());
+        try {
+            return UUID.fromString(subject);
+        } catch (IllegalArgumentException ex) {
+            return UUID.nameUUIDFromBytes(subject.getBytes(StandardCharsets.UTF_8));
+        }
     }
 }

@@ -3,6 +3,7 @@ package dev.cricklive.commentary.domain;
 import lombok.*;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -36,6 +37,7 @@ public class CommentaryDocument {
     private int ballNumber;
 
     /** Reference to the source ball event for traceability. */
+    @Indexed(unique = true)
     private String ballEventId;
 
     private String text;

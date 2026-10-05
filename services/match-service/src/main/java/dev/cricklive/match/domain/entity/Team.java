@@ -2,6 +2,8 @@ package dev.cricklive.match.domain.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Represents a cricket team (national or franchise).
@@ -21,6 +23,7 @@ public class Team extends BaseEntity {
     @Column(name = "short_name", nullable = false, length = 10)
     private String shortName;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "country_code", length = 3)
     private String countryCode;
 

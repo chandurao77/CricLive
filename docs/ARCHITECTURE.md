@@ -1,5 +1,8 @@
 # CrickLive — Architecture
 
+> **Implementation note (2026-10):** the diagrams below show the target architecture. Currently built: match-, scoring- and commentary-service + web. Kafka payloads are JSON (not Avro, no Schema Registry), auth is a shared-secret JWT, and there is no API gateway; see ADR-009 to ADR-012 in [DECISIONS.md](DECISIONS.md).
+
+
 ## 1. High-Level Component Diagram
 
 ```mermaid

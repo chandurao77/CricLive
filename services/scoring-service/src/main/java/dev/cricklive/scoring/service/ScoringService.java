@@ -1,14 +1,24 @@
 package dev.cricklive.scoring.service;
 
-import dev.cricklive.scoring.avro.BallEvent;
 import dev.cricklive.scoring.domain.BallEventDocument;
+import dev.cricklive.scoring.domain.InningsCounter;
+import dev.cricklive.scoring.dto.BallAck;
+import dev.cricklive.scoring.dto.BallEvent;
 import dev.cricklive.scoring.dto.BallInputDto;
+import dev.cricklive.scoring.exception.EventPublishException;
 import dev.cricklive.scoring.kafka.BallEventProducer;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
+import com.mongodb.client.model.ReturnDocument;
+import com.mongodb.client.model.Updates;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -19,102 +29,127 @@ import java.util.UUID;
 @Slf4j
 public class ScoringService {
 
+    private static final int SIX = 6;
+    private static final int FOUR = 4;
+
     private final BallEventProducer producer;
     private final MongoTemplate mongoTemplate;
 
     /**
-     * Validates the ball input, persists it to MongoDB event store, then
-     * publishes the Avro event to Kafka. Idempotent via eventId check.
+     * Validates a delivery, numbers it, stores it in the event store, then publishes it to Kafka and
+     * waits for the acknowledgement. If publishing fails the stored event is removed again so the
+     * scorer can safely retry with the same idempotency key.
+     *
+     * @param input    the scorer's input
+     * @param scorerId id of the authenticated scorer
+     * @return acknowledgement with the assigned sequence and over.ball position
      */
-    public void recordBall(BallInputDto input, UUID scorerId) {
-        String idempotencyKey = resolveIdempotencyKey(input);
+    public BallAck recordBall(BallInputDto input, UUID scorerId) {
+        BallRules.validate(input);
 
-        // Idempotency guard — if this event was already stored, skip
-        if (eventAlreadyExists(idempotencyKey)) {
-            log.warn("Duplicate ball event ignored idempotencyKey={}", idempotencyKey);
-            return;
+        String eventId = input.idempotencyKey() != null && !input.idempotencyKey().isBlank()
+                ? input.idempotencyKey()
+                : UUID.randomUUID().toString();
+
+        BallEventDocument existing = findByEventId(eventId);
+        if (existing != null) {
+            log.warn("Duplicate ball ignored eventId={}", eventId);
+            return ackOf(existing, true);
         }
 
-        BallEventDocument doc = BallEventDocument.builder()
-                .eventId(idempotencyKey)
-                .matchId(input.matchId())
-                .inningsId(input.inningsId())
-                .overNumber(deriveOverNumber(input))
-                .ballNumber(deriveBallNumber(input))
-                .batterId(input.batterId())
-                .bowlerId(input.bowlerId())
-                .runsScored(input.runsScored())
-                .wicket(input.wicket())
-                .dismissalType(input.dismissalType())
-                .dismissedBatterId(input.dismissedBatterId())
-                .fielderId(input.fielderId())
-                .wide(input.wide())
-                .noBall(input.noBall())
-                .bye(input.bye())
-                .legBye(input.legBye())
-                .extraRuns(input.extraRuns())
-                .boundary(input.runsScored() == 4 || input.runsScored() == 6)
-                .six(input.runsScored() == 6)
+        boolean legal = BallRules.isLegal(input);
+        InningsCounter counter = nextCounter(input.inningsId(), legal);
+        BallEventDocument doc = buildDocument(input, scorerId, eventId, counter, legal);
+
+        try {
+            mongoTemplate.insert(doc);
+        } catch (DuplicateKeyException dup) {
+            // A concurrent request with the same idempotency key won the race.
+            compensate(input.inningsId(), legal);
+            return ackOf(findByEventId(eventId), true);
+        }
+
+        try {
+            producer.publish(toEvent(doc));
+        } catch (Exception ex) {
+            if (ex instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            mongoTemplate.remove(Query.query(Criteria.where("eventId").is(eventId)), BallEventDocument.class);
+            compensate(input.inningsId(), legal);
+            log.error("Kafka publish failed, ball not recorded eventId={}", eventId, ex);
+            throw new EventPublishException("Kafka publish failed for " + eventId, ex);
+        }
+
+        log.info("Recorded ball eventId={} matchId={} innings={} over={}.{} runs={}",
+                eventId, doc.getMatchId(), doc.getInningsId(), doc.getOverNumber(), doc.getBallNumber(), doc.getRunsScored());
+        return ackOf(doc, false);
+    }
+
+    private BallEventDocument findByEventId(String eventId) {
+        return mongoTemplate.findOne(Query.query(Criteria.where("eventId").is(eventId)), BallEventDocument.class);
+    }
+
+    /** Atomically bumps the innings counters and returns the new values. */
+    private InningsCounter nextCounter(UUID inningsId, boolean legal) {
+        Document updated = mongoTemplate.execute(InningsCounter.COLLECTION, collection ->
+                collection.findOneAndUpdate(
+                        Filters.eq("_id", inningsId.toString()),
+                        Updates.combine(Updates.inc("seq", 1L), Updates.inc("legalBalls", legal ? 1 : 0)),
+                        new FindOneAndUpdateOptions().upsert(true).returnDocument(ReturnDocument.AFTER)));
+        return mongoTemplate.getConverter().read(InningsCounter.class, updated);
+    }
+
+    /** Undoes the legal-ball increment of a delivery that was not kept. Sequence numbers may gap. */
+    private void compensate(UUID inningsId, boolean legal) {
+        if (legal) {
+            mongoTemplate.updateFirst(
+                    Query.query(Criteria.where("_id").is(inningsId.toString())),
+                    new Update().inc("legalBalls", -1),
+                    InningsCounter.class);
+        }
+    }
+
+    private BallEventDocument buildDocument(BallInputDto in, UUID scorerId, String eventId,
+                                            InningsCounter counter, boolean legal) {
+        int legalAfter = counter.getLegalBalls();
+        return BallEventDocument.builder()
+                .eventId(eventId)
+                .sequence(counter.getSeq())
+                .matchId(in.matchId())
+                .inningsId(in.inningsId())
+                .overNumber(BallRules.overNumber(legalAfter, legal))
+                .ballNumber(BallRules.ballNumber(legalAfter, legal))
+                .legalBall(legal)
+                .legalBallsInInnings(legalAfter)
+                .batterId(in.batterId())
+                .bowlerId(in.bowlerId())
+                .runsScored(in.runsScored())
+                .wicket(in.wicket())
+                .dismissalType(in.wicket() ? in.dismissalType().toUpperCase() : null)
+                .dismissedBatterId(in.wicket() && in.dismissedBatterId() == null ? in.batterId() : in.dismissedBatterId())
+                .fielderId(in.fielderId())
+                .wide(in.wide())
+                .noBall(in.noBall())
+                .bye(in.bye())
+                .legBye(in.legBye())
+                .extraRuns(BallRules.normalizedExtraRuns(in))
+                .boundary(in.runsScored() == FOUR || in.runsScored() == SIX)
+                .six(in.runsScored() == SIX)
                 .timestamp(Instant.now())
                 .scorerId(scorerId)
                 .build();
-
-        mongoTemplate.insert(doc, "ball_events");
-
-        BallEvent avroEvent = toAvro(doc, scorerId);
-        producer.send(avroEvent).exceptionally(ex -> {
-            log.error("Kafka publish failed for eventId={}, will retry via outbox", idempotencyKey, ex);
-            return null;
-        });
-
-        log.info("Recorded ball eventId={} matchId={} inningsId={} runsScored={}",
-                idempotencyKey, input.matchId(), input.inningsId(), input.runsScored());
     }
 
-    private boolean eventAlreadyExists(String idempotencyKey) {
-        Query q = Query.query(Criteria.where("eventId").is(idempotencyKey));
-        return mongoTemplate.exists(q, "ball_events");
+    private BallEvent toEvent(BallEventDocument d) {
+        return new BallEvent(d.getEventId(), d.getSequence(), d.getMatchId(), d.getInningsId(),
+                d.getOverNumber(), d.getBallNumber(), d.isLegalBall(), d.getLegalBallsInInnings(),
+                d.getBatterId(), d.getBowlerId(), d.getRunsScored(), d.isWicket(), d.getDismissalType(),
+                d.getDismissedBatterId(), d.getFielderId(), d.isWide(), d.isNoBall(), d.isBye(), d.isLegBye(),
+                d.getExtraRuns(), d.isBoundary(), d.isSix(), d.getTimestamp(), d.getScorerId());
     }
 
-    private String resolveIdempotencyKey(BallInputDto input) {
-        return input.idempotencyKey() != null
-                ? input.idempotencyKey()
-                : UUID.randomUUID().toString();
-    }
-
-    /** Derives 0-indexed over number from the current innings state (placeholder — real impl queries current state). */
-    private int deriveOverNumber(BallInputDto input) {
-        // Production: fetch current over from match state cache
-        return 0;
-    }
-
-    private int deriveBallNumber(BallInputDto input) {
-        return 1;
-    }
-
-    private BallEvent toAvro(BallEventDocument doc, UUID scorerId) {
-        return BallEvent.newBuilder()
-                .setEventId(doc.getEventId())
-                .setMatchId(doc.getMatchId().toString())
-                .setInningsId(doc.getInningsId().toString())
-                .setOverNumber(doc.getOverNumber())
-                .setBallNumber(doc.getBallNumber())
-                .setBatterId(doc.getBatterId().toString())
-                .setBowlerId(doc.getBowlerId().toString())
-                .setRunsScored(doc.getRunsScored())
-                .setIsWicket(doc.isWicket())
-                .setDismissalType(doc.getDismissalType())
-                .setDismissedBatterId(doc.getDismissedBatterId() != null ? doc.getDismissedBatterId().toString() : null)
-                .setFielderId(doc.getFielderId() != null ? doc.getFielderId().toString() : null)
-                .setIsWide(doc.isWide())
-                .setIsNoBall(doc.isNoBall())
-                .setIsBye(doc.isBye())
-                .setIsLegBye(doc.isLegBye())
-                .setExtraRuns(doc.getExtraRuns())
-                .setIsBoundary(doc.isBoundary())
-                .setIsSix(doc.isSix())
-                .setTimestamp(doc.getTimestamp().toEpochMilli())
-                .setScorerId(scorerId.toString())
-                .build();
+    private BallAck ackOf(BallEventDocument d, boolean duplicate) {
+        return new BallAck(d.getEventId(), d.getSequence(), d.getOverNumber(), d.getBallNumber(), d.isLegalBall(), duplicate);
     }
 }

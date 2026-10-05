@@ -12,6 +12,7 @@ public record MatchDetailDto(
         UUID id,
         MatchFormat format,
         MatchStatus status,
+        String statusText,
         String seriesName,
         TeamRefDto homeTeam,
         TeamRefDto awayTeam,
